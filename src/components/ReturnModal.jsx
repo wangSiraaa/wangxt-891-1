@@ -11,16 +11,18 @@ function ReturnModal({ recordId, onClose, showAlert }) {
 
   if (!record) return null;
 
+  const isReturnNoteValid = returnNote.trim().length > 0;
+  const isDamageNoteValid = returnStatus !== 'damaged' || damageNote.trim().length > 0;
+  const isSubmitEnabled = isReturnNoteValid && isDamageNoteValid;
+
   const handleSubmit = () => {
-    if (returnStatus === 'damaged') {
-      if (!returnNote.trim() && !damageNote.trim()) {
-        showAlert('danger', '损坏工具请填写处理备注');
-        return;
-      }
+    if (!isReturnNoteValid) {
+      showAlert('danger', '请填写工具状态说明');
+      return;
     }
     
-    if (!returnNote.trim()) {
-      showAlert('danger', '请填写工具状态说明');
+    if (returnStatus === 'damaged' && !isDamageNoteValid) {
+      showAlert('danger', '选择有损坏时必须填写损坏处理备注，不能用状态说明代替');
       return;
     }
 
@@ -28,9 +30,9 @@ function ReturnModal({ recordId, onClose, showAlert }) {
       type: 'RETURN_TOOL',
       payload: {
         recordId,
-        returnNote,
+        returnNote: returnNote.trim(),
         damageReported: returnStatus === 'damaged',
-        damageNote: damageNote || returnNote,
+        damageNote: returnStatus === 'damaged' ? damageNote.trim() : '',
       }
     });
 
@@ -100,10 +102,15 @@ function ReturnModal({ recordId, onClose, showAlert }) {
           <button 
             className="btn btn-primary"
             onClick={handleSubmit}
-            disabled={!returnNote.trim()}
+            disabled={!isSubmitEnabled}
           >
             确认归还
           </button>
+          {!isSubmitEnabled && (
+            <div style={{ fontSize: '12px', color: '#dc3545', marginTop: '8px', width: '100%', textAlign: 'right' }}>
+              {!isReturnNoteValid ? '请填写状态说明' : (returnStatus === 'damaged' && !isDamageNoteValid ? '请填写损坏处理备注' : '')}
+            </div>
+          )}
         </div>
       </div>
     </div>

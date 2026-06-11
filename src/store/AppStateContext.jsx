@@ -119,6 +119,18 @@ function appReducer(state, action) {
       const { recordId, returnNote, damageReported, damageNote } = action.payload;
       const record = state.borrowRecords.find(r => r.id === recordId);
       if (!record || record.status !== 'borrowed') return state;
+
+      const trimmedReturnNote = (returnNote || '').trim();
+      const trimmedDamageNote = (damageNote || '').trim();
+
+      if (!trimmedReturnNote) {
+        console.warn('归还校验失败：状态说明不能为空');
+        return state;
+      }
+      if (damageReported && !trimmedDamageNote) {
+        console.warn('归还校验失败：损坏工具必须单独填写损坏处理备注，不能用状态说明代替');
+        return state;
+      }
       
       const returnDate = new Date().toISOString().split('T')[0];
       const isOnTime = !isOverdue(record.dueDate);
@@ -131,9 +143,9 @@ function appReducer(state, action) {
             ...r,
             returnDate,
             status: newStatus,
-            returnNote,
+            returnNote: trimmedReturnNote,
             damageReported,
-            damageNote,
+            damageNote: damageReported ? trimmedDamageNote : '',
           };
         }
         return r;
@@ -166,7 +178,7 @@ function appReducer(state, action) {
         targetId: record.toolId,
         targetName: record.toolName,
         details: damageReported 
-          ? `归还${record.toolName}，发现损坏：${damageNote || returnNote}` 
+          ? `归还${record.toolName}，发现损坏：${trimmedDamageNote}` 
           : `归还${record.toolName}，状态正常`,
         time: new Date().toLocaleString('zh-CN'),
       }];
@@ -183,7 +195,7 @@ function appReducer(state, action) {
           reportDate: returnDate,
           completeDate: null,
           status: 'reported',
-          description: damageNote || returnNote,
+          description: trimmedDamageNote,
           photoPlaceholder: true,
         }, ...newMaintenanceRecords];
       }

@@ -160,15 +160,196 @@ test('有逾期记录的用户不能借出', () => {
   assert(!canBorrow, '有逾期记录的用户应该不能借出');
 });
 
-test('归还损坏工具必须填写备注', () => {
-  const canReturnWithoutNote = (damageNote, returnNote) => {
+test('归还必须填写状态说明', () => {
+  const validateStatus = (returnNote) => {
     if (!returnNote.trim()) return false;
     return true;
   };
   
-  assert(!canReturnWithoutNote('', ''), '没有备注不能归还');
-  assert(!canReturnWithoutNote('', '   '), '空白备注不能归还');
-  assert(canReturnWithoutNote('', '工具完好'), '有状态说明可以归还');
+  assert(!validateStatus(''), '没有状态说明不能归还');
+  assert(!validateStatus('   '), '空白状态说明不能归还');
+  assert(validateStatus('工具完好'), '有状态说明可以通过校验');
+});
+
+test('选择有损坏时必须单独填写损坏处理备注 - 按钮禁用', () => {
+  const isButtonDisabled = (returnStatus, returnNote, damageNote) => {
+    return !returnNote.trim() || (returnStatus === 'damaged' && !damageNote.trim());
+  };
+  
+  assert(isButtonDisabled('normal', '', ''), '没有状态说明按钮禁用');
+  assert(!isButtonDisabled('normal', '工具完好', ''), '正常归还时有状态说明按钮可用');
+  assert(isButtonDisabled('damaged', '有损坏', ''), '选择损坏但无损坏备注按钮禁用');
+  assert(isButtonDisabled('damaged', '', '手柄断裂'), '选择损坏但无状态说明按钮禁用');
+  assert(!isButtonDisabled('damaged', '有损坏', '手柄断裂需要更换'), '选择损坏且两者都填写按钮可用');
+});
+
+test('选择有损坏时必须单独填写损坏处理备注 - 提交校验', () => {
+  const validateSubmit = (returnStatus, returnNote, damageNote) => {
+    if (!returnNote.trim()) {
+      return { valid: false, error: '请填写工具状态说明' };
+    }
+    if (returnStatus === 'damaged') {
+      if (!damageNote.trim()) {
+        return { valid: false, error: '请填写损坏处理备注' };
+      }
+    }
+    return { valid: true };
+  };
+  
+  let result = validateSubmit('normal', '', '');
+  assert(!result.valid && result.error === '请填写工具状态说明', '无状态说明校验失败');
+  
+  result = validateSubmit('normal', '工具完好', '');
+  assert(result.valid, '正常归还校验通过');
+  
+  result = validateSubmit('damaged', '有损坏', '');
+  assert(!result.valid && result.error === '请填写损坏处理备注', '选择损坏但无损坏备注校验失败');
+  
+  result = validateSubmit('damaged', '', '手柄断裂');
+  assert(!result.valid && result.error === '请填写工具状态说明', '选择损坏但无状态说明校验失败');
+  
+  result = validateSubmit('damaged', '有损坏', '手柄断裂需要更换');
+  assert(result.valid, '选择损坏且两者都填写校验通过');
+});
+
+test('不能用状态说明自动代替损坏处理备注', () => {
+  const buildPayload = (returnStatus, returnNote, damageNote) => {
+    return {
+      returnNote,
+      damageReported: returnStatus === 'damaged',
+      damageNote: damageNote,
+    };
+  };
+  
+  const payload1 = buildPayload('damaged', '工具损坏', '');
+  assert(payload1.damageNote === '', '空的损坏备注应该保持为空，不能用状态说明代替');
+  assert(payload1.damageNote !== payload1.returnNote, '损坏备注不能等于状态说明');
+  
+  const payload2 = buildPayload('damaged', '有损坏', '手柄断裂');
+  assert(payload2.damageNote === '手柄断裂', '有损坏备注时应该保持原值');
+});
+
+console.log('\n🔐 5. Reducer 服务端校验验证');
+console.log('-'.repeat(40));
+
+function simulateReturnReducer(state, payload) {
+  const { recordId, returnNote, damageReported, damageNote } = payload;
+  const record = state.borrowRecords.find(r => r.id === recordId);
+  if (!record || record.status !== 'borrowed') return { stateChanged: false, reason: 'record_not_found' };
+
+  const trimmedReturnNote = (returnNote || '').trim();
+  const trimmedDamageNote = (damageNote || '').trim();
+
+  if (!trimmedReturnNote) {
+    return { stateChanged: false, reason: 'empty_return_note' };
+  }
+  if (damageReported && !trimmedDamageNote) {
+    return { stateChanged: false, reason: 'empty_damage_note' };
+  }
+
+  const logDetails = damageReported 
+    ? `归还${record.toolName}，发现损坏：${trimmedDamageNote}` 
+    : `归还${record.toolName}，状态正常`;
+
+  const maintenanceDesc = damageReported ? trimmedDamageNote : null;
+
+  return {
+    stateChanged: true,
+    trimmedReturnNote,
+    trimmedDamageNote: damageReported ? trimmedDamageNote : '',
+    logDetails,
+    maintenanceDesc,
+  };
+}
+
+test('reducer 校验 - 空状态说明被拒绝', () => {
+  const borrowedRecord = seedData.borrowRecords.find(r => r.status === 'borrowed');
+  assert(borrowedRecord, '存在借出中的记录');
+  
+  const result = simulateReturnReducer(seedData, {
+    recordId: borrowedRecord.id,
+    returnNote: '',
+    damageReported: false,
+    damageNote: '',
+  });
+  assert(!result.stateChanged && result.reason === 'empty_return_note', '空状态说明应被拒绝');
+});
+
+test('reducer 校验 - 仅空格状态说明被拒绝', () => {
+  const borrowedRecord = seedData.borrowRecords.find(r => r.status === 'borrowed');
+  const result = simulateReturnReducer(seedData, {
+    recordId: borrowedRecord.id,
+    returnNote: '   ',
+    damageReported: false,
+    damageNote: '',
+  });
+  assert(!result.stateChanged && result.reason === 'empty_return_note', '仅空格状态说明应被拒绝');
+});
+
+test('reducer 校验 - 损坏时未单独填损坏备注被拒绝', () => {
+  const borrowedRecord = seedData.borrowRecords.find(r => r.status === 'borrowed');
+  const result = simulateReturnReducer(seedData, {
+    recordId: borrowedRecord.id,
+    returnNote: '工具有些损坏',
+    damageReported: true,
+    damageNote: '',
+  });
+  assert(!result.stateChanged && result.reason === 'empty_damage_note', '损坏但无损坏备注应被拒绝');
+});
+
+test('reducer 校验 - 损坏时仅空格损坏备注被拒绝', () => {
+  const borrowedRecord = seedData.borrowRecords.find(r => r.status === 'borrowed');
+  const result = simulateReturnReducer(seedData, {
+    recordId: borrowedRecord.id,
+    returnNote: '有损坏',
+    damageReported: true,
+    damageNote: '   ',
+  });
+  assert(!result.stateChanged && result.reason === 'empty_damage_note', '损坏但仅空格损坏备注应被拒绝');
+});
+
+test('reducer 校验 - 正常归还校验通过且数据正确', () => {
+  const borrowedRecord = seedData.borrowRecords.find(r => r.status === 'borrowed');
+  const result = simulateReturnReducer(seedData, {
+    recordId: borrowedRecord.id,
+    returnNote: '  工具完好无损  ',
+    damageReported: false,
+    damageNote: '',
+  });
+  assert(result.stateChanged, '正常归还应通过校验');
+  assert(result.trimmedReturnNote === '工具完好无损', '状态说明应被 trim');
+  assert(result.trimmedDamageNote === '', '非损坏时损坏备注应为空字符串');
+  assert(result.logDetails.includes('状态正常'), '日志应显示状态正常');
+  assert(result.maintenanceDesc === null, '非损坏时不生成维修描述');
+});
+
+test('reducer 校验 - 损坏归还校验通过且两者独立保存', () => {
+  const borrowedRecord = seedData.borrowRecords.find(r => r.status === 'borrowed');
+  const result = simulateReturnReducer(seedData, {
+    recordId: borrowedRecord.id,
+    returnNote: '  归还时检查发现问题  ',
+    damageReported: true,
+    damageNote: '  手柄塑料外壳断裂，需更换  ',
+  });
+  assert(result.stateChanged, '损坏归还应通过校验');
+  assert(result.trimmedReturnNote === '归还时检查发现问题', '状态说明应被 trim');
+  assert(result.trimmedDamageNote === '手柄塑料外壳断裂，需更换', '损坏备注应被 trim');
+  assert(result.trimmedReturnNote !== result.trimmedDamageNote, '状态说明与损坏备注必须独立，不能互相替代');
+  assert(result.logDetails.includes('手柄塑料外壳断裂，需更换'), '操作日志必须使用损坏备注，不能用状态说明代替');
+  assert(result.maintenanceDesc === '手柄塑料外壳断裂，需更换', '维修记录必须使用损坏备注，不能用状态说明代替');
+});
+
+test('reducer 校验 - 损坏备注与状态说明相同视为有效但独立保存', () => {
+  const borrowedRecord = seedData.borrowRecords.find(r => r.status === 'borrowed');
+  const result = simulateReturnReducer(seedData, {
+    recordId: borrowedRecord.id,
+    returnNote: '手柄断裂',
+    damageReported: true,
+    damageNote: '手柄断裂',
+  });
+  assert(result.stateChanged, '用户主动填写相同内容应允许通过');
+  assert(result.trimmedReturnNote === '手柄断裂', '状态说明保存正确');
+  assert(result.trimmedDamageNote === '手柄断裂', '损坏备注保存正确');
 });
 
 console.log('\n📊 3. 排行榜数据验证');
@@ -215,10 +396,21 @@ if (failed > 0) {
   console.log('  ✅ 同一工具不能重复加入借用篮');
   console.log('  ✅ 有逾期记录不能借出');
   console.log('  ✅ 归还必须填写状态说明');
+  console.log('  ✅ 选择损坏时必须填写损坏处理备注 - 按钮禁用');
+  console.log('  ✅ 选择损坏时必须填写损坏处理备注 - 提交校验');
+  console.log('  ✅ 不能用状态说明自动代替损坏处理备注');
+  console.log('  ✅ Reducer服务端校验 - 空状态说明被拒绝');
+  console.log('  ✅ Reducer服务端校验 - 仅空格状态说明被拒绝');
+  console.log('  ✅ Reducer服务端校验 - 损坏时未单独填损坏备注被拒绝');
+  console.log('  ✅ Reducer服务端校验 - 损坏时仅空格损坏备注被拒绝');
+  console.log('  ✅ Reducer服务端校验 - 正常归还数据正确且损坏备注为空');
+  console.log('  ✅ Reducer服务端校验 - 损坏归还状态说明与损坏备注独立保存');
+  console.log('  ✅ Reducer服务端校验 - 操作日志与维修记录使用损坏备注而非状态说明');
   console.log('  ✅ 排行榜按借用次数排序');
   console.log('  ✅ 操作日志完整记录');
   console.log('\n💡 提示：');
   console.log('  - 数据持久化：localStorage 保存，刷新页面后数据仍保留');
   console.log('  - 启动应用：npm run dev');
   console.log('  - 构建生产版本：npm run build');
+  console.log('  - 运行测试：npm run smoke');
 }
