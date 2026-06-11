@@ -1,0 +1,23 @@
+{
+  "name": "community-tool-sharing",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "社区共享工具借还台 - 浏览器本地应用",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173",
+    "smoke": "node scripts/smoke-test.js",
+    "seed": "node scripts/seed-data.js"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^5.4.0"
+  }
+}
