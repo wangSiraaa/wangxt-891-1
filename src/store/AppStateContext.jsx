@@ -57,6 +57,15 @@ function appReducer(state, action) {
       );
       if (hasOverdue) return state;
       
+      const invalidTools = state.borrowCart.filter(item => {
+        const tool = state.tools.find(t => t.id === item.toolId);
+        return !tool || tool.status !== 'available' || tool.locked;
+      });
+      if (invalidTools.length > 0) {
+        console.warn('CHECKOUT_BORROW 校验失败：存在不可借用的工具', invalidTools);
+        return state;
+      }
+      
       const today = new Date();
       const dueDate = new Date(today);
       dueDate.setDate(dueDate.getDate() + dueDays);

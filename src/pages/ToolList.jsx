@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppState } from '../store/AppStateContext.jsx';
 import ToolCard from '../components/ToolCard.jsx';
 
@@ -7,6 +7,7 @@ function ToolList({ onToolClick, showAlert }) {
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [collapsedGroups, setCollapsedGroups] = useState({});
 
   const filteredTools = state.tools.filter(tool => {
     if (selectedCategory !== 'all' && tool.categoryId !== selectedCategory) return false;
@@ -17,6 +18,43 @@ function ToolList({ onToolClick, showAlert }) {
     }
     return true;
   });
+
+  const groupedTools = state.categories.reduce((acc, category) => {
+    const toolsInCategory = filteredTools.filter(t => t.categoryId === category.id);
+    if (toolsInCategory.length > 0) {
+      acc.push({ category, tools: toolsInCategory });
+    }
+    return acc;
+  }, []);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('tool_list_collapsed');
+    if (saved) {
+      try {
+        setCollapsedGroups(JSON.parse(saved));
+      } catch (e) {
+        setCollapsedGroups({});
+      }
+    }
+  }, []);
+
+  const toggleGroup = (categoryId) => {
+    setCollapsedGroups(prev => {
+      const next = { ...prev, [categoryId]: !prev[categoryId] };
+      localStorage.setItem('tool_list_collapsed', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    const allCollapsed = groupedTools.every(g => collapsedGroups[g.category.id]);
+    const next = {};
+    if (!allCollapsed) {
+      groupedTools.forEach(g => { next[g.category.id] = true; });
+    }
+    setCollapsedGroups(next);
+    localStorage.setItem('tool_list_collapsed', JSON.stringify(next));
+  };
 
   const handleAddToCart = (toolId) => {
     if (currentUser?.role !== 'resident') {
@@ -49,14 +87,25 @@ function ToolList({ onToolClick, showAlert }) {
     showAlert('success', '已加入借用篮');
   };
 
+  const allCollapsed = groupedTools.length > 0 && groupedTools.every(g => collapsedGroups[g.category.id]);
+
   return (
     <div>
       <div className="card">
         <div className="card-header">
           <h2>工具列表</h2>
-          <span style={{ fontSize: '14px', color: '#666' }}>
-            共 {filteredTools.length} 件工具
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '14px', color: '#666' }}>
+              共 {filteredTools.length} 件工具
+            </span>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={toggleAll}
+              disabled={groupedTools.length === 0}
+            >
+              {allCollapsed ? '全部展开' : '全部折叠'}
+            </button>
+          </div>
         </div>
         
         <div className="filter-section">
@@ -91,55 +140,74 @@ function ToolList({ onToolClick, showAlert }) {
         </div>
       </div>
 
-      <div className="tool-grid">
-        {filteredTools.map(tool => (
-          <div key={tool.id} style={{ position: 'relative' }}>
-            <ToolCard tool={tool} onClick={onToolClick} />
-            {currentUser?.role === 'resident' && (
-              <button
-                className="btn btn-primary btn-sm"
-                style={{ 
-                  position: 'absolute', 
-                  bottom: '70px', 
-                  right: '12px',
-                  display: canBorrowTool(tool.id, currentUser.id) ? 'block' : 'none'
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleAddToCart(tool.id);
-                }}
-                disabled={!canBorrowTool(tool.id, currentUser.id)}
-              >
-                加入借用篮
-              </button>
-            )}
-            {currentUser?.role === 'resident' && 
-             tool.status === 'available' && 
-             !tool.locked &&
-             hasOverdueRecords(currentUser.id) && (
-              <div style={{ 
-                position: 'absolute', 
-                bottom: '70px', 
-                right: '12px',
-                background: '#ffc107',
-                color: '#333',
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '12px',
-                fontWeight: '500',
-              }}>
-                仅可预约
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
       {filteredTools.length === 0 && (
         <div className="card" style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
           暂无符合条件的工具
         </div>
       )}
+
+      {filteredTools.length > 0 && groupedTools.map(({ category, tools }) => (
+        <div key={category.id} className="tool-group">
+          <div 
+            className="tool-group-header"
+            onClick={() => toggleGroup(category.id)}
+          >
+            <div className="tool-group-title">
+              <span className="tool-group-arrow">
+                {collapsedGroups[category.id] ? '▶' : '▼'}
+              </span>
+              <span className="tool-group-icon">{category.icon}</span>
+              <span className="tool-group-name">{category.name}</span>
+              <span className="tool-group-count">{tools.length} 件</span>
+            </div>
+          </div>
+          {!collapsedGroups[category.id] && (
+            <div className="tool-grid">
+              {tools.map(tool => (
+                <div key={tool.id} style={{ position: 'relative' }}>
+                  <ToolCard tool={tool} onClick={onToolClick} />
+                  {currentUser?.role === 'resident' && (
+                    <button
+                      className="btn btn-primary btn-sm"
+                      style={{ 
+                        position: 'absolute', 
+                        bottom: '70px', 
+                        right: '12px',
+                        display: canBorrowTool(tool.id, currentUser.id) ? 'block' : 'none'
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleAddToCart(tool.id);
+                      }}
+                      disabled={!canBorrowTool(tool.id, currentUser.id)}
+                    >
+                      加入借用篮
+                    </button>
+                  )}
+                  {currentUser?.role === 'resident' && 
+                   tool.status === 'available' && 
+                   !tool.locked &&
+                   hasOverdueRecords(currentUser.id) && (
+                    <div style={{ 
+                      position: 'absolute', 
+                      bottom: '70px', 
+                      right: '12px',
+                      background: '#ffc107',
+                      color: '#333',
+                      padding: '6px 12px',
+                      borderRadius: '6px',
+                      fontSize: '12px',
+                      fontWeight: '500',
+                    }}>
+                      仅可预约
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
